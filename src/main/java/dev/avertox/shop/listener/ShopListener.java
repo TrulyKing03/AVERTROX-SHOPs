@@ -5,6 +5,7 @@ import dev.avertox.shop.gui.MenuClickContext;
 import dev.avertox.shop.gui.MenuController;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
@@ -37,7 +38,7 @@ public class ShopListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
         if (!menuController.hasPendingInput(player.getUniqueId())) {
@@ -49,7 +50,7 @@ public class ShopListener implements Listener {
                 menuController.handleChatInput(player, message));
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     @SuppressWarnings("deprecation")
     public void onLegacyChat(PlayerChatEvent event) {
         Player player = event.getPlayer();
