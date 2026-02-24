@@ -8,6 +8,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerChatEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -28,6 +30,10 @@ public class ShopListener implements Listener {
         if (!(event.getView().getTopInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
             return;
         }
+        if ("sell-input".equals(holder.getMenuId())) {
+            menuController.handleSellInputClick(event, player, holder);
+            return;
+        }
         if (event.getClickedInventory() == null || !event.getClickedInventory().equals(event.getView().getTopInventory())) {
             event.setCancelled(true);
             return;
@@ -36,6 +42,25 @@ public class ShopListener implements Listener {
         if (holder.actionFor(event.getSlot()) != null) {
             holder.actionFor(event.getSlot()).accept(new MenuClickContext(player, event));
         }
+    }
+
+    @EventHandler
+    public void onDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        menuController.handleSellInputDrag(event, player);
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent event) {
+        if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+        if (!(event.getInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
+            return;
+        }
+        menuController.handleInventoryClose(player, event.getInventory(), holder);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -65,6 +90,6 @@ public class ShopListener implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        menuController.clearState(event.getPlayer().getUniqueId());
+        menuController.clearState(event.getPlayer());
     }
 }

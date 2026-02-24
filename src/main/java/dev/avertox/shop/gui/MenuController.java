@@ -24,11 +24,13 @@ import java.util.stream.Collectors;
 
 public class MenuController {
     private static final int PAGE_SIZE = 45;
+    private static final int SELL_INPUT_LAST_SLOT = 44;
     private final JavaPlugin plugin;
     private final ShopService shopService;
     private final PermissionService permissionService;
     private final Map<UUID, PendingCreation> pendingCreations = new ConcurrentHashMap<>();
     private final Map<UUID, PendingInput> pendingInputs = new ConcurrentHashMap<>();
+    private final Map<UUID, SellInventorySession> sellSessions = new ConcurrentHashMap<>();
 
     public MenuController(JavaPlugin plugin, ShopService shopService, PermissionService permissionService) {
         this.plugin = plugin;
@@ -55,17 +57,51 @@ public class MenuController {
         }
 
         holder.onClick(10, ctx -> openCreativeCategories(ctx.player(), ListingType.AUCTION, 0));
-        holder.onClick(12, ctx -> openCreateOfferMenu(ctx.player(), ListingType.AUCTION));
+        holder.onClick(12, ctx -> openSellInputMenu(ctx.player(), ListingType.AUCTION));
         holder.onClick(14, ctx -> openManageOffers(ctx.player(), 0));
         holder.onClick(16, ctx -> openCreativeCategories(ctx.player(), ListingType.ADMIN_SHOP, 0));
-        holder.onClick(22, ctx -> openCreateOfferMenu(ctx.player(), ListingType.ADMIN_SHOP));
+        holder.onClick(22, ctx -> openSellInputMenu(ctx.player(), ListingType.ADMIN_SHOP));
 
         player.openInventory(inventory);
     }
 
+    public void openSellInputMenu(Player player, ListingType type) {
+        if (type == ListingType.ADMIN_SHOP && !permissionService.isAdmin(player.getUniqueId())) {
+            player.sendMessage(prefix("Only admins can create admin shop offers.", false));
+            return;
+        }
+        cancelPendingCreation(player, false);
+
+        AvertoxMenuHolder holder = new AvertoxMenuHolder("sell-input");
+        Inventory inventory = Bukkit.createInventory(holder, 54, color("&6&lAvertox Sell Input"));
+        holder.bind(inventory);
+
+        for (int slot = 45; slot < 54; slot++) {
+            inventory.setItem(slot, named(Material.GRAY_STAINED_GLASS_PANE, "&8", List.of()));
+        }
+        inventory.setItem(46, named(Material.BARRIER, "&cClear", List.of("&7Clear input slots")));
+        inventory.setItem(49, named(Material.EMERALD_BLOCK, "&aProceed", List.of("&7Continue to pricing/name")));
+        inventory.setItem(53, named(Material.ARROW, "&7Back", List.of("&7Return to main menu")));
+
+        holder.onClick(46, ctx -> {
+            returnSellInputItems(ctx.player(), inventory);
+            ctx.player().sendMessage(prefix("Sell input cleared.", true));
+        });
+        holder.onClick(49, ctx -> proceedFromSellInput(ctx.player(), type, inventory));
+        holder.onClick(53, ctx -> {
+            returnSellInputItems(ctx.player(), inventory);
+            sellSessions.remove(ctx.player().getUniqueId());
+            openMainMenu(ctx.player());
+        });
+
+        sellSessions.put(player.getUniqueId(), new SellInventorySession(type));
+        player.openInventory(inventory);
+        player.sendMessage(prefix("Drag only one item type into the top area, then click Proceed.", true));
+    }
+
     public void openCreativeCategories(Player player, ListingType type, int page) {
         Map<String, List<ShopListing>> grouped = shopService.groupedByCreativeCategory(type);
-        List<String> categories = grouped.keySet().stream().sorted().toList();
+        List<String> categories = sortCreativeCategories(grouped.keySet().stream().toList());
 
         AvertoxMenuHolder holder = new AvertoxMenuHolder("categories");
         Inventory inventory = Bukkit.createInventory(holder, 54, color("&6&lAvertox " + (type == ListingType.AUCTION ? "Auction" : "AdminShop") + " Categories"));
@@ -81,6 +117,8 @@ public class MenuController {
             holder.onClick(slot, ctx -> openListingPage(ctx.player(), type, category, 0));
         }
 
+        inventory.setItem(48, named(Material.COMPASS, "&bRefresh", List.of("&7Reload live offers")));
+        holder.onClick(48, ctx -> openCreativeCategories(ctx.player(), type, page));
         decoratePaging(holder, inventory, page, categories.size(), nextPage -> openCreativeCategories(player, type, nextPage), () -> openMainMenu(player));
         player.openInventory(inventory);
     }
@@ -121,6 +159,8 @@ public class MenuController {
             });
         }
 
+        inventory.setItem(48, named(Material.COMPASS, "&bRefresh", List.of("&7Reload live offers")));
+        holder.onClick(48, ctx -> openListingPage(ctx.player(), type, category, page));
         decoratePaging(holder, inventory, page, listings.size(), nextPage -> openListingPage(player, type, category, nextPage), () -> openCreativeCategories(player, type, 0));
         player.openInventory(inventory);
     }
@@ -209,45 +249,44 @@ public class MenuController {
     }
 
     public void openCreateOfferMenu(Player player, ListingType type) {
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        if (hand.getType() == Material.AIR) {
-            player.sendMessage(prefix("Hold the item in your main hand first.", false));
-            return;
-        }
         if (type == ListingType.ADMIN_SHOP && !permissionService.isAdmin(player.getUniqueId())) {
             player.sendMessage(prefix("Only admins can create admin shop offers.", false));
             return;
         }
 
-        PendingCreation creation = pendingCreations.computeIfAbsent(player.getUniqueId(), id -> {
-            String defaultName = hand.getType().name().toLowerCase().replace("_", " ");
-            return new PendingCreation(type, hand.clone(), hand.getAmount(), defaultName, 10.0);
-        });
-        creation.type = type;
-        if (!hand.isSimilar(creation.item)) {
-            creation.item = hand.clone();
-            creation.quantity = hand.getAmount();
+        PendingCreation creation = pendingCreations.get(player.getUniqueId());
+        if (creation == null) {
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            if (hand.getType() == Material.AIR) {
+                player.sendMessage(prefix("Hold an item or use the sell input first.", false));
+                return;
+            }
+            creation = new PendingCreation(type, hand.clone(), hand.getAmount(), hand.getAmount(), defaultOfferName(hand), 10.0, null, false);
+            pendingCreations.put(player.getUniqueId(), creation);
         }
+        creation.type = type;
+        PendingCreation current = creation;
 
         AvertoxMenuHolder holder = new AvertoxMenuHolder("create");
         Inventory inventory = Bukkit.createInventory(holder, 27, color("&6&lAvertox Create Offer"));
         holder.bind(inventory);
-        inventory.setItem(4, hand.clone());
-        inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(creation.price))));
-        inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(creation.price))));
-        inventory.setItem(12, named(Material.PAPER, "&fSet Price in Chat", List.of("&7Current: $" + ShopService.formatPrice(creation.price))));
-        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name", List.of("&7Current: " + creation.offerName)));
-        inventory.setItem(15, named(Material.HOPPER, "&aQuantity -1", List.of("&7Current: " + creation.quantity, "&7Held: " + hand.getAmount())));
-        inventory.setItem(16, named(Material.CHEST_MINECART, "&aQuantity +1", List.of("&7Current: " + creation.quantity, "&7Held: " + hand.getAmount())));
-        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity in Chat", List.of("&7Current: " + creation.quantity)));
+        inventory.setItem(4, current.item.clone());
+        inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
+        inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
+        inventory.setItem(12, named(Material.PAPER, "&fSet Price in Chat", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
+        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name", List.of("&7Current: " + current.offerName)));
+        inventory.setItem(15, named(Material.HOPPER, "&aQuantity -1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
+        inventory.setItem(16, named(Material.CHEST_MINECART, "&aQuantity +1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
+        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity in Chat", List.of("&7Current: " + current.quantity)));
+        inventory.setItem(23, named(Material.BARRIER, "&cCancel Sell", List.of("&7Return reserved items")));
         inventory.setItem(22, named(Material.EMERALD_BLOCK, "&aConfirm Offer", List.of("&7Create listing")));
 
         holder.onClick(10, ctx -> {
-            creation.price = Math.max(0.01, creation.price - 1.0);
+            current.price = Math.max(0.01, current.price - 1.0);
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(11, ctx -> {
-            creation.price += 1.0;
+            current.price += 1.0;
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(12, ctx -> {
@@ -261,19 +300,21 @@ public class MenuController {
             ctx.player().sendMessage(prefix("Type the offer name in chat.", true));
         });
         holder.onClick(15, ctx -> {
-            creation.quantity = Math.max(1, creation.quantity - 1);
+            current.quantity = Math.max(1, current.quantity - 1);
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(16, ctx -> {
-            ItemStack currentHand = ctx.player().getInventory().getItemInMainHand();
-            int max = currentHand.getType() == Material.AIR ? 1 : currentHand.getAmount();
-            creation.quantity = Math.min(Math.max(1, max), creation.quantity + 1);
+            current.quantity = Math.min(Math.max(1, current.maxQuantity), current.quantity + 1);
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(21, ctx -> {
             pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_QUANTITY, null));
             ctx.player().closeInventory();
             ctx.player().sendMessage(prefix("Type the offer quantity in chat.", true));
+        });
+        holder.onClick(23, ctx -> {
+            cancelPendingCreation(ctx.player(), true);
+            openMainMenu(ctx.player());
         });
         holder.onClick(22, ctx -> confirmCreation(ctx.player()));
         player.openInventory(inventory);
@@ -285,9 +326,8 @@ public class MenuController {
             player.sendMessage(prefix("No creation session available.", false));
             return;
         }
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        if (hand.getType() == Material.AIR || !hand.isSimilar(creation.item) || hand.getAmount() < creation.quantity) {
-            player.sendMessage(prefix("Main hand item changed or quantity is too low.", false));
+        if (creation.quantity > creation.maxQuantity) {
+            player.sendMessage(prefix("Quantity cannot exceed reserved amount.", false));
             return;
         }
 
@@ -298,8 +338,20 @@ public class MenuController {
             result = shopService.createAdminListing(player, creation.item, creation.quantity, creation.offerName, creation.price);
         }
         if (result.success()) {
-            hand.setAmount(hand.getAmount() - creation.quantity);
-            player.getInventory().setItemInMainHand(hand.getAmount() <= 0 ? null : hand);
+            if (!creation.reservedFromSellInput) {
+                ItemStack hand = player.getInventory().getItemInMainHand();
+                if (hand.getType() == Material.AIR || !hand.isSimilar(creation.item) || hand.getAmount() < creation.quantity) {
+                    player.sendMessage(prefix("Main hand item changed before confirmation.", false));
+                    return;
+                }
+                hand.setAmount(hand.getAmount() - creation.quantity);
+                player.getInventory().setItemInMainHand(hand.getAmount() <= 0 ? null : hand);
+            } else if (creation.quantity < creation.maxQuantity) {
+                int toReturn = creation.maxQuantity - creation.quantity;
+                ItemStack returned = creation.item.clone();
+                returned.setAmount(toReturn);
+                addToPlayerOrDrop(player, returned);
+            }
             pendingCreations.remove(player.getUniqueId());
             player.sendMessage(prefix(result.message(), true));
             openMainMenu(player);
@@ -379,6 +431,11 @@ public class MenuController {
                     openCreateOfferMenu(player, creation.type);
                     return;
                 }
+                if (value > creation.maxQuantity) {
+                    player.sendMessage(prefix("Quantity cannot be higher than " + creation.maxQuantity + ".", false));
+                    openCreateOfferMenu(player, creation.type);
+                    return;
+                }
                 creation.quantity = value;
                 player.sendMessage(prefix("Quantity updated to " + value + ".", true));
                 openCreateOfferMenu(player, creation.type);
@@ -395,9 +452,226 @@ public class MenuController {
         }
     }
 
+    public void handleSellInputClick(org.bukkit.event.inventory.InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
+        Inventory top = event.getView().getTopInventory();
+        int rawSlot = event.getRawSlot();
+        int topSize = top.getSize();
+
+        if (rawSlot < topSize) {
+            if (rawSlot > SELL_INPUT_LAST_SLOT) {
+                event.setCancelled(true);
+                if (holder.actionFor(rawSlot) != null) {
+                    holder.actionFor(rawSlot).accept(new MenuClickContext(player, event));
+                }
+                return;
+            }
+            plugin.getServer().getScheduler().runTask(plugin, () -> sanitizeSellInput(player, top));
+            return;
+        }
+
+        if (event.isShiftClick()) {
+            event.setCancelled(true);
+            ItemStack clicked = event.getCurrentItem();
+            if (clicked == null || clicked.getType() == Material.AIR) {
+                return;
+            }
+            int remaining = moveToSellInput(top, clicked.clone(), player);
+            if (remaining <= 0) {
+                event.getClickedInventory().setItem(event.getSlot(), null);
+            } else {
+                clicked.setAmount(remaining);
+                event.getClickedInventory().setItem(event.getSlot(), clicked);
+            }
+            plugin.getServer().getScheduler().runTask(plugin, () -> sanitizeSellInput(player, top));
+        }
+    }
+
+    public void handleSellInputDrag(org.bukkit.event.inventory.InventoryDragEvent event, Player player) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
+            return;
+        }
+        if (!"sell-input".equals(holder.getMenuId())) {
+            return;
+        }
+
+        int topSize = event.getView().getTopInventory().getSize();
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot >= topSize) {
+                continue;
+            }
+            if (rawSlot > SELL_INPUT_LAST_SLOT) {
+                event.setCancelled(true);
+                return;
+            }
+        }
+        plugin.getServer().getScheduler().runTask(plugin, () -> sanitizeSellInput(player, event.getView().getTopInventory()));
+    }
+
+    public void handleInventoryClose(Player player, Inventory inventory, AvertoxMenuHolder holder) {
+        if (!"sell-input".equals(holder.getMenuId())) {
+            return;
+        }
+        SellInventorySession session = sellSessions.get(player.getUniqueId());
+        if (session == null) {
+            return;
+        }
+        if (session.proceeding) {
+            sellSessions.remove(player.getUniqueId());
+            return;
+        }
+        returnSellInputItems(player, inventory);
+        sellSessions.remove(player.getUniqueId());
+    }
+
     public void clearState(UUID playerId) {
         pendingInputs.remove(playerId);
         pendingCreations.remove(playerId);
+        sellSessions.remove(playerId);
+    }
+
+    public void clearState(Player player) {
+        PendingCreation creation = pendingCreations.remove(player.getUniqueId());
+        if (creation != null) {
+            returnReservedItems(player, creation);
+        }
+        pendingInputs.remove(player.getUniqueId());
+        sellSessions.remove(player.getUniqueId());
+    }
+
+    private void proceedFromSellInput(Player player, ListingType type, Inventory inventory) {
+        ItemStack reference = null;
+        int total = 0;
+        List<ItemStack> reserved = new ArrayList<>();
+
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack == null || stack.getType() == Material.AIR) {
+                continue;
+            }
+            if (reference == null) {
+                reference = stack.clone();
+                reference.setAmount(1);
+            } else if (!stack.isSimilar(reference)) {
+                player.sendMessage(prefix("Only one item type (with same meta) is allowed.", false));
+                return;
+            }
+            total += stack.getAmount();
+            reserved.add(stack.clone());
+        }
+
+        if (reference == null || total <= 0) {
+            player.sendMessage(prefix("Add items first before proceeding.", false));
+            return;
+        }
+
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT; slot++) {
+            inventory.setItem(slot, null);
+        }
+
+        SellInventorySession session = sellSessions.get(player.getUniqueId());
+        if (session != null) {
+            session.proceeding = true;
+        }
+
+        PendingCreation old = pendingCreations.put(player.getUniqueId(),
+                new PendingCreation(type, reference, total, total, defaultOfferName(reference), 10.0, reserved, true));
+        if (old != null) {
+            returnReservedItems(player, old);
+        }
+        openCreateOfferMenu(player, type);
+    }
+
+    private void sanitizeSellInput(Player player, Inventory inventory) {
+        ItemStack reference = null;
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack == null || stack.getType() == Material.AIR) {
+                continue;
+            }
+            if (reference == null) {
+                reference = stack.clone();
+                reference.setAmount(1);
+                continue;
+            }
+            if (!stack.isSimilar(reference)) {
+                inventory.setItem(slot, null);
+                addToPlayerOrDrop(player, stack);
+            }
+        }
+    }
+
+    private int moveToSellInput(Inventory inventory, ItemStack moving, Player player) {
+        ItemStack reference = null;
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack != null && stack.getType() != Material.AIR) {
+                reference = stack.clone();
+                reference.setAmount(1);
+                break;
+            }
+        }
+
+        if (reference != null && !moving.isSimilar(reference)) {
+            player.sendMessage(prefix("Only one item type can be added.", false));
+            return moving.getAmount();
+        }
+
+        int remaining = moving.getAmount();
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT && remaining > 0; slot++) {
+            ItemStack slotItem = inventory.getItem(slot);
+            if (slotItem == null || slotItem.getType() == Material.AIR) {
+                ItemStack placed = moving.clone();
+                int put = Math.min(remaining, moving.getMaxStackSize());
+                placed.setAmount(put);
+                inventory.setItem(slot, placed);
+                remaining -= put;
+                continue;
+            }
+            if (!slotItem.isSimilar(moving) || slotItem.getAmount() >= slotItem.getMaxStackSize()) {
+                continue;
+            }
+            int canPut = Math.min(remaining, slotItem.getMaxStackSize() - slotItem.getAmount());
+            slotItem.setAmount(slotItem.getAmount() + canPut);
+            remaining -= canPut;
+        }
+
+        moving.setAmount(remaining);
+        return remaining;
+    }
+
+    private void returnSellInputItems(Player player, Inventory inventory) {
+        for (int slot = 0; slot <= SELL_INPUT_LAST_SLOT; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack == null || stack.getType() == Material.AIR) {
+                continue;
+            }
+            inventory.setItem(slot, null);
+            addToPlayerOrDrop(player, stack);
+        }
+    }
+
+    private void addToPlayerOrDrop(Player player, ItemStack item) {
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item);
+        leftovers.values().forEach(left -> player.getWorld().dropItemNaturally(player.getLocation(), left));
+    }
+
+    private void cancelPendingCreation(Player player, boolean notify) {
+        PendingCreation creation = pendingCreations.remove(player.getUniqueId());
+        if (creation != null) {
+            returnReservedItems(player, creation);
+            if (notify) {
+                player.sendMessage(prefix("Sell process canceled and items returned.", true));
+            }
+        }
+    }
+
+    private void returnReservedItems(Player player, PendingCreation creation) {
+        if (!creation.reservedFromSellInput || creation.reservedItems == null) {
+            return;
+        }
+        for (ItemStack reserved : creation.reservedItems) {
+            addToPlayerOrDrop(player, reserved);
+        }
     }
 
     private static ItemStack named(Material material, String name, List<String> lore) {
@@ -417,6 +691,30 @@ public class MenuController {
 
     private static String prefix(String msg, boolean ok) {
         return color((ok ? "&a[Avertox] " : "&c[Avertox] ") + msg);
+    }
+
+    private static String defaultOfferName(ItemStack item) {
+        return item.getType().name().toLowerCase().replace("_", " ");
+    }
+
+    private static List<String> sortCreativeCategories(List<String> categories) {
+        List<String> ordered = new ArrayList<>(List.of(
+                "BUILDING_BLOCKS",
+                "DECORATIONS",
+                "REDSTONE",
+                "TRANSPORTATION",
+                "MISC",
+                "FOOD",
+                "TOOLS",
+                "COMBAT",
+                "BREWING"
+        ));
+        for (String category : categories) {
+            if (!ordered.contains(category)) {
+                ordered.add(category);
+            }
+        }
+        return ordered.stream().filter(categories::contains).toList();
     }
 
     private static <T> List<T> page(List<T> list, int page) {
@@ -482,15 +780,31 @@ public class MenuController {
         private ListingType type;
         private ItemStack item;
         private int quantity;
+        private int maxQuantity;
         private String offerName;
         private double price;
+        private List<ItemStack> reservedItems;
+        private boolean reservedFromSellInput;
 
-        private PendingCreation(ListingType type, ItemStack item, int quantity, String offerName, double price) {
+        private PendingCreation(ListingType type, ItemStack item, int quantity, int maxQuantity, String offerName, double price,
+                                List<ItemStack> reservedItems, boolean reservedFromSellInput) {
             this.type = type;
             this.item = item;
             this.quantity = quantity;
+            this.maxQuantity = maxQuantity;
             this.offerName = offerName;
             this.price = price;
+            this.reservedItems = reservedItems;
+            this.reservedFromSellInput = reservedFromSellInput;
+        }
+    }
+
+    private static class SellInventorySession {
+        private final ListingType type;
+        private boolean proceeding;
+
+        private SellInventorySession(ListingType type) {
+            this.type = type;
         }
     }
 }
