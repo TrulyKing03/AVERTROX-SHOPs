@@ -572,6 +572,16 @@ public class MenuController {
         sellSessions.remove(player.getUniqueId());
     }
 
+    public void handleAnvilInventoryClose(Player player, Inventory inventory) {
+        if (inventory.getType() != InventoryType.ANVIL) {
+            return;
+        }
+        if (!pendingInputs.containsKey(player.getUniqueId())) {
+            return;
+        }
+        handleAnvilClose(player, inventory);
+    }
+
     private void handleAnvilClose(Player player, Inventory inventory) {
         if (!pendingInputs.containsKey(player.getUniqueId())) {
             anvilTypedText.remove(player.getUniqueId());

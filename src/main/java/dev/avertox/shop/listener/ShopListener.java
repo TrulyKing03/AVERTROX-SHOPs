@@ -66,6 +66,10 @@ public class ShopListener implements Listener {
         if (!(event.getPlayer() instanceof Player player)) {
             return;
         }
+        if (event.getInventory().getType() == InventoryType.ANVIL && menuController.hasPendingInput(player.getUniqueId())) {
+            menuController.handleAnvilInventoryClose(player, event.getInventory());
+            return;
+        }
         if (!(event.getInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
             return;
         }
