@@ -9,6 +9,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -33,6 +34,7 @@ public class MenuController {
     private final Map<UUID, PendingCreation> pendingCreations = new ConcurrentHashMap<>();
     private final Map<UUID, PendingInput> pendingInputs = new ConcurrentHashMap<>();
     private final Map<UUID, SellInventorySession> sellSessions = new ConcurrentHashMap<>();
+    private final Map<UUID, String> anvilTypedText = new ConcurrentHashMap<>();
 
     public MenuController(JavaPlugin plugin, ShopService shopService, PermissionService permissionService) {
         this.plugin = plugin;
@@ -459,12 +461,38 @@ public class MenuController {
         }
         event.setCancelled(true);
 
-        String text = readAnvilText(event.getView().getTopInventory());
+        String text = anvilTypedText.getOrDefault(player.getUniqueId(), readAnvilText(event.getView().getTopInventory()));
         if (text.isEmpty()) {
             player.sendMessage(prefix("Type a value in the anvil rename field first.", false));
             return;
         }
         handleAnvilSubmit(player, text);
+    }
+
+    public void handlePrepareAnvil(PrepareAnvilEvent event, Player player) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
+            return;
+        }
+        if (!"anvil-input".equals(holder.getMenuId())) {
+            return;
+        }
+
+        String typed = readRenameTextFromView(event.getView(), event.getInventory());
+        if (typed == null) {
+            typed = "";
+        }
+        typed = typed.trim();
+        if (!typed.isEmpty()) {
+            anvilTypedText.put(player.getUniqueId(), typed);
+        }
+
+        ItemStack result = new ItemStack(Material.PAPER);
+        ItemMeta resultMeta = result.getItemMeta();
+        if (resultMeta != null) {
+            resultMeta.setDisplayName(typed.isEmpty() ? " " : typed);
+            result.setItemMeta(resultMeta);
+        }
+        event.setResult(result);
     }
 
     public void handleSellInputClick(org.bukkit.event.inventory.InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
@@ -543,11 +571,13 @@ public class MenuController {
 
     private void handleAnvilClose(Player player, Inventory inventory) {
         if (!pendingInputs.containsKey(player.getUniqueId())) {
+            anvilTypedText.remove(player.getUniqueId());
             return;
         }
-        String text = readAnvilText(inventory);
+        String text = anvilTypedText.getOrDefault(player.getUniqueId(), readAnvilText(inventory));
         if (text.isEmpty()) {
             pendingInputs.remove(player.getUniqueId());
+            anvilTypedText.remove(player.getUniqueId());
             return;
         }
         handleAnvilSubmit(player, text);
@@ -555,6 +585,7 @@ public class MenuController {
 
     private void openAnvilInput(Player player, PendingInputType type, UUID listingId, String title, String seedText) {
         pendingInputs.put(player.getUniqueId(), new PendingInput(type, listingId));
+        anvilTypedText.put(player.getUniqueId(), seedText);
         AvertoxMenuHolder holder = new AvertoxMenuHolder("anvil-input");
         Inventory inventory = Bukkit.createInventory(holder, InventoryType.ANVIL, color("&6&lAvertox " + title));
         holder.bind(inventory);
@@ -572,6 +603,7 @@ public class MenuController {
 
     private void handleAnvilSubmit(Player player, String text) {
         PendingInput pendingInput = pendingInputs.remove(player.getUniqueId());
+        anvilTypedText.remove(player.getUniqueId());
         if (pendingInput == null) {
             return;
         }
@@ -656,6 +688,7 @@ public class MenuController {
         pendingInputs.remove(playerId);
         pendingCreations.remove(playerId);
         sellSessions.remove(playerId);
+        anvilTypedText.remove(playerId);
     }
 
     public void clearState(Player player) {
@@ -665,6 +698,7 @@ public class MenuController {
         }
         pendingInputs.remove(player.getUniqueId());
         sellSessions.remove(player.getUniqueId());
+        anvilTypedText.remove(player.getUniqueId());
     }
 
     private void proceedFromSellInput(Player player, ListingType type, Inventory inventory) {
@@ -942,6 +976,18 @@ public class MenuController {
         ItemStack left = top.getItem(0);
         String fromLeft = readDisplayName(left);
         return fromLeft;
+    }
+
+    private static String readRenameTextFromView(org.bukkit.inventory.InventoryView view, Inventory top) {
+        try {
+            java.lang.reflect.Method method = view.getClass().getMethod("getRenameText");
+            Object value = method.invoke(view);
+            if (value instanceof String renameText && !renameText.trim().isEmpty()) {
+                return renameText.trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return readAnvilText(top);
     }
 
     private static String readDisplayName(ItemStack item) {
