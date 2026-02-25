@@ -10,7 +10,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.ItemStack;
@@ -459,16 +458,12 @@ public class MenuController {
         }
         event.setCancelled(true);
 
-        if (!(event.getView().getTopInventory() instanceof AnvilInventory anvilInventory)) {
-            player.sendMessage(prefix("Anvil input unavailable.", false));
-            return;
-        }
-        String text = anvilInventory.getRenameText();
-        if (text == null || text.trim().isEmpty()) {
+        String text = readAnvilText(event.getView().getTopInventory());
+        if (text.isEmpty()) {
             player.sendMessage(prefix("Type a value in the anvil rename field first.", false));
             return;
         }
-        handleAnvilSubmit(player, text.trim());
+        handleAnvilSubmit(player, text);
     }
 
     public void handleSellInputClick(org.bukkit.event.inventory.InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
@@ -906,6 +901,30 @@ public class MenuController {
         } catch (NumberFormatException ignored) {
             return -1;
         }
+    }
+
+    private static String readAnvilText(Inventory top) {
+        ItemStack result = top.getItem(2);
+        String fromResult = readDisplayName(result);
+        if (!fromResult.isEmpty()) {
+            return fromResult;
+        }
+
+        ItemStack left = top.getItem(0);
+        String fromLeft = readDisplayName(left);
+        return fromLeft;
+    }
+
+    private static String readDisplayName(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR) {
+            return "";
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null || !meta.hasDisplayName()) {
+            return "";
+        }
+        String value = ChatColor.stripColor(meta.getDisplayName());
+        return value == null ? "" : value.trim();
     }
 
     private enum PendingInputType {
