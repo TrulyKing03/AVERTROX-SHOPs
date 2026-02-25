@@ -216,8 +216,8 @@ public class MenuController {
         inventory.setItem(4, listing.getItem().clone());
         inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(listing.getPrice()))));
         inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(listing.getPrice()))));
-        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Anvil)", List.of("&7Use anvil text input")));
-        inventory.setItem(14, named(Material.NAME_TAG, "&bRename Offer (Anvil)", List.of("&7Use anvil text input")));
+        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Chat)", List.of("&7Type value in private chat input")));
+        inventory.setItem(14, named(Material.NAME_TAG, "&bRename Offer (Chat)", List.of("&7Type value in private chat input")));
         inventory.setItem(15, named(Material.HOPPER, "&aAdd Stack From Hand", List.of("&7Main hand must match")));
         inventory.setItem(16, named(Material.BARRIER, "&cRemove Offer", List.of("&7Delete this listing")));
         inventory.setItem(22, named(Material.ARROW, "&7Back", List.of("&7Return to your offers")));
@@ -233,10 +233,14 @@ public class MenuController {
             openOfferEditor(ctx.player(), listingId);
         });
         holder.onClick(12, ctx -> {
-            openAnvilInput(ctx.player(), PendingInputType.UPDATE_PRICE, listingId, "Set Price", "0.00");
+            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.UPDATE_PRICE, listingId));
+            ctx.player().closeInventory();
+            ctx.player().sendMessage(prefix("Type the new price in chat.", true));
         });
         holder.onClick(14, ctx -> {
-            openAnvilInput(ctx.player(), PendingInputType.UPDATE_NAME, listingId, "Rename Offer", listing.getOfferName());
+            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.UPDATE_NAME, listingId));
+            ctx.player().closeInventory();
+            ctx.player().sendMessage(prefix("Type the new offer name in chat.", true));
         });
         holder.onClick(15, ctx -> {
             ServiceResult result = shopService.addToStack(ctx.player(), listingId, ctx.player().getInventory().getItemInMainHand());
@@ -277,11 +281,11 @@ public class MenuController {
         inventory.setItem(4, current.item.clone());
         inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
         inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
-        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Anvil)", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
-        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name (Anvil)", List.of("&7Current: " + current.offerName)));
+        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Chat)", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
+        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name (Chat)", List.of("&7Current: " + current.offerName)));
         inventory.setItem(15, named(Material.HOPPER, "&aQuantity -1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
         inventory.setItem(16, named(Material.CHEST_MINECART, "&aQuantity +1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
-        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity (Anvil)", List.of("&7Current: " + current.quantity)));
+        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity (Chat)", List.of("&7Current: " + current.quantity)));
         inventory.setItem(23, named(Material.BARRIER, "&cCancel Sell", List.of("&7Return reserved items")));
         inventory.setItem(22, named(Material.EMERALD_BLOCK, "&aConfirm Offer", List.of("&7Create listing")));
 
@@ -294,10 +298,14 @@ public class MenuController {
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(12, ctx -> {
-            openAnvilInput(ctx.player(), PendingInputType.CREATE_PRICE, null, "Set Price", "0.00");
+            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_PRICE, null));
+            ctx.player().closeInventory();
+            ctx.player().sendMessage(prefix("Type the offer price in chat.", true));
         });
         holder.onClick(14, ctx -> {
-            openAnvilInput(ctx.player(), PendingInputType.CREATE_NAME, null, "Set Name", current.offerName);
+            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_NAME, null));
+            ctx.player().closeInventory();
+            ctx.player().sendMessage(prefix("Type the offer name in chat.", true));
         });
         holder.onClick(15, ctx -> {
             current.quantity = Math.max(1, current.quantity - 1);
@@ -308,7 +316,9 @@ public class MenuController {
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(21, ctx -> {
-            openAnvilInput(ctx.player(), PendingInputType.CREATE_QUANTITY, null, "Set Quantity", String.valueOf(current.quantity));
+            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_QUANTITY, null));
+            ctx.player().closeInventory();
+            ctx.player().sendMessage(prefix("Type the offer quantity in chat.", true));
         });
         holder.onClick(23, ctx -> {
             cancelPendingCreation(ctx.player(), true);
