@@ -10,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerChatEvent;
@@ -29,10 +30,13 @@ public class ShopListener implements Listener {
             return;
         }
         if (!(event.getView().getTopInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
+            if (event.getView().getTopInventory().getType() == InventoryType.ANVIL && menuController.hasPendingInput(player.getUniqueId())) {
+                menuController.handleAnvilInputClick(event, player);
+            }
             return;
         }
-        if ("anvil-input".equals(holder.getMenuId())) {
-            menuController.handleAnvilInputClick(event, player, holder);
+        if ("anvil-input".equals(holder.getMenuId()) || (event.getView().getTopInventory().getType() == InventoryType.ANVIL && menuController.hasPendingInput(player.getUniqueId()))) {
+            menuController.handleAnvilInputClick(event, player);
             return;
         }
         if ("sell-input".equals(holder.getMenuId())) {
@@ -71,6 +75,9 @@ public class ShopListener implements Listener {
     @EventHandler
     public void onPrepareAnvil(PrepareAnvilEvent event) {
         if (!(event.getView().getPlayer() instanceof Player player)) {
+            return;
+        }
+        if (!menuController.hasPendingInput(player.getUniqueId())) {
             return;
         }
         menuController.handlePrepareAnvil(event, player);

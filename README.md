@@ -2,7 +2,7 @@
 
 AvertoxShop is a Minecraft auction and admin shop plugin with a branded interactive GUI.
 
-## Updates (Commit 2 -> Commit 11)
+## Updates (Commit 2 -> Commit 12)
 
 ### Commit 2
 - Added full AvertoxShop project source code to GitHub.
@@ -49,10 +49,15 @@ AvertoxShop is a Minecraft auction and admin shop plugin with a branded interact
   - prices now accept `$100`, `100.00`, and comma formats
   - quantities accept comma/space formatted input
 
-### Commit 11 (Current)
+### Commit 11
 - Added `PrepareAnvilEvent` handling for stable typed-text capture across server variants.
 - Ensured anvil result is always generated for submission and cached per-player.
 - Fixed submit/close behavior so name, quantity, and price changes apply consistently.
+
+### Commit 12 (Current)
+- Removed strict anvil holder dependence for submit/capture handling.
+- Routed anvil processing by inventory type + pending shop input state for cross-server reliability.
+- Hardened price parsing to accept symbols/formatting by stripping non-numeric characters safely.
 
 ## Features
 - Players can sell items in the auction.
