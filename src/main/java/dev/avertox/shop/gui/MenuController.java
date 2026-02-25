@@ -452,7 +452,8 @@ public class MenuController {
         if (!"anvil-input".equals(holder.getMenuId())) {
             return;
         }
-        if (event.getRawSlot() != 2) {
+        boolean isResult = event.getSlotType() == org.bukkit.event.inventory.InventoryType.SlotType.RESULT || event.getRawSlot() == 2;
+        if (!isResult) {
             event.setCancelled(false);
             return;
         }
@@ -524,7 +525,7 @@ public class MenuController {
     public void handleInventoryClose(Player player, Inventory inventory, AvertoxMenuHolder holder) {
         if (!"sell-input".equals(holder.getMenuId())) {
             if ("anvil-input".equals(holder.getMenuId())) {
-                pendingInputs.remove(player.getUniqueId());
+                handleAnvilClose(player, inventory);
             }
             return;
         }
@@ -538,6 +539,18 @@ public class MenuController {
         }
         returnSellInputItems(player, inventory);
         sellSessions.remove(player.getUniqueId());
+    }
+
+    private void handleAnvilClose(Player player, Inventory inventory) {
+        if (!pendingInputs.containsKey(player.getUniqueId())) {
+            return;
+        }
+        String text = readAnvilText(inventory);
+        if (text.isEmpty()) {
+            pendingInputs.remove(player.getUniqueId());
+            return;
+        }
+        handleAnvilSubmit(player, text);
     }
 
     private void openAnvilInput(Player player, PendingInputType type, UUID listingId, String title, String seedText) {
@@ -889,7 +902,11 @@ public class MenuController {
 
     private static double parsePrice(String message) {
         try {
-            return Double.parseDouble(message.trim());
+            String normalized = message.trim()
+                    .replace("$", "")
+                    .replace(",", "")
+                    .replace(" ", "");
+            return Double.parseDouble(normalized);
         } catch (NumberFormatException ignored) {
             return -1;
         }
@@ -897,13 +914,25 @@ public class MenuController {
 
     private static int parseQuantity(String message) {
         try {
-            return Integer.parseInt(message.trim());
+            String normalized = message.trim()
+                    .replace(",", "")
+                    .replace(" ", "");
+            return Integer.parseInt(normalized);
         } catch (NumberFormatException ignored) {
             return -1;
         }
     }
 
     private static String readAnvilText(Inventory top) {
+        try {
+            java.lang.reflect.Method method = top.getClass().getMethod("getRenameText");
+            Object value = method.invoke(top);
+            if (value instanceof String renameText && !renameText.trim().isEmpty()) {
+                return renameText.trim();
+            }
+        } catch (Exception ignored) {
+        }
+
         ItemStack result = top.getItem(2);
         String fromResult = readDisplayName(result);
         if (!fromResult.isEmpty()) {
