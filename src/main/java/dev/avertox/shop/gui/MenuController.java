@@ -10,6 +10,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.ItemStack;
@@ -115,10 +116,14 @@ public class MenuController {
             List<ShopListing> offers = grouped.getOrDefault(category, List.of());
             Material icon = defaultCategoryIcon(category);
             int slot = i;
-            inventory.setItem(slot, named(icon, "&e" + prettyCategory(category), List.of("&7Offers: &f" + offers.size(), "&8Click to open")));
+            inventory.setItem(slot, named(icon, "&6&l" + prettyCategory(category), List.of("&7Creative Tab", "&7Offers: &f" + offers.size(), "&eClick to open")));
             holder.onClick(slot, ctx -> openListingPage(ctx.player(), type, category, 0));
         }
 
+        for (int slot = 45; slot < 54; slot++) {
+            inventory.setItem(slot, named(Material.ORANGE_STAINED_GLASS_PANE, "&8", List.of()));
+        }
+        inventory.setItem(50, named(Material.NETHER_STAR, "&6&lAvertox Categories", List.of("&7Pick a creative category")));
         inventory.setItem(48, named(Material.COMPASS, "&bRefresh", List.of("&7Reload live offers")));
         holder.onClick(48, ctx -> openCreativeCategories(ctx.player(), type, page));
         decoratePaging(holder, inventory, page, categories.size(), nextPage -> openCreativeCategories(player, type, nextPage), () -> openMainMenu(player));
@@ -210,8 +215,8 @@ public class MenuController {
         inventory.setItem(4, listing.getItem().clone());
         inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(listing.getPrice()))));
         inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(listing.getPrice()))));
-        inventory.setItem(12, named(Material.PAPER, "&fSet Price in Chat", List.of("&7Type a number in chat")));
-        inventory.setItem(14, named(Material.NAME_TAG, "&bRename Offer", List.of("&7Type new name in chat")));
+        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Anvil)", List.of("&7Use anvil text input")));
+        inventory.setItem(14, named(Material.NAME_TAG, "&bRename Offer (Anvil)", List.of("&7Use anvil text input")));
         inventory.setItem(15, named(Material.HOPPER, "&aAdd Stack From Hand", List.of("&7Main hand must match")));
         inventory.setItem(16, named(Material.BARRIER, "&cRemove Offer", List.of("&7Delete this listing")));
         inventory.setItem(22, named(Material.ARROW, "&7Back", List.of("&7Return to your offers")));
@@ -271,11 +276,11 @@ public class MenuController {
         inventory.setItem(4, current.item.clone());
         inventory.setItem(10, named(Material.GOLD_NUGGET, "&6Price -1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
         inventory.setItem(11, named(Material.GOLD_INGOT, "&6Price +1", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
-        inventory.setItem(12, named(Material.PAPER, "&fSet Price in Chat", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
-        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name", List.of("&7Current: " + current.offerName)));
+        inventory.setItem(12, named(Material.PAPER, "&fSet Price (Anvil)", List.of("&7Current: $" + ShopService.formatPrice(current.price))));
+        inventory.setItem(14, named(Material.NAME_TAG, "&bSet Offer Name (Anvil)", List.of("&7Current: " + current.offerName)));
         inventory.setItem(15, named(Material.HOPPER, "&aQuantity -1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
         inventory.setItem(16, named(Material.CHEST_MINECART, "&aQuantity +1", List.of("&7Current: " + current.quantity, "&7Max: " + current.maxQuantity)));
-        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity in Chat", List.of("&7Current: " + current.quantity)));
+        inventory.setItem(21, named(Material.PAPER, "&fSet Quantity (Anvil)", List.of("&7Current: " + current.quantity)));
         inventory.setItem(23, named(Material.BARRIER, "&cCancel Sell", List.of("&7Return reserved items")));
         inventory.setItem(22, named(Material.EMERALD_BLOCK, "&aConfirm Offer", List.of("&7Create listing")));
 
@@ -302,9 +307,7 @@ public class MenuController {
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(21, ctx -> {
-            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_QUANTITY, null));
-            ctx.player().closeInventory();
-            ctx.player().sendMessage(prefix("Type the offer quantity in chat.", true));
+            openAnvilInput(ctx.player(), PendingInputType.CREATE_QUANTITY, null, "Set Quantity", String.valueOf(current.quantity));
         });
         holder.onClick(23, ctx -> {
             cancelPendingCreation(ctx.player(), true);
@@ -447,17 +450,25 @@ public class MenuController {
     }
 
     public void handleAnvilInputClick(InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
-        event.setCancelled(true);
-        if (!"anvil-input".equals(holder.getMenuId()) || event.getRawSlot() != 2) {
+        if (!"anvil-input".equals(holder.getMenuId())) {
             return;
         }
-        ItemStack result = event.getCurrentItem();
-        if (result == null || result.getType() == Material.AIR) {
+        if (event.getRawSlot() != 2) {
+            event.setCancelled(false);
+            return;
+        }
+        event.setCancelled(true);
+
+        if (!(event.getView().getTopInventory() instanceof AnvilInventory anvilInventory)) {
+            player.sendMessage(prefix("Anvil input unavailable.", false));
+            return;
+        }
+        String text = anvilInventory.getRenameText();
+        if (text == null || text.trim().isEmpty()) {
             player.sendMessage(prefix("Type a value in the anvil rename field first.", false));
             return;
         }
-        String text = extractAnvilText(result);
-        handleAnvilSubmit(player, text);
+        handleAnvilSubmit(player, text.trim());
     }
 
     public void handleSellInputClick(org.bukkit.event.inventory.InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
@@ -606,19 +617,31 @@ public class MenuController {
                 creation.price = value;
                 openCreateOfferMenu(player, creation.type);
             }
+            case CREATE_QUANTITY -> {
+                PendingCreation creation = pendingCreations.get(player.getUniqueId());
+                if (creation == null) {
+                    player.sendMessage(prefix("No creation session available.", false));
+                    return;
+                }
+                int value = parseQuantity(text);
+                if (value <= 0) {
+                    player.sendMessage(prefix("Quantity must be a whole number greater than 0.", false));
+                    openCreateOfferMenu(player, creation.type);
+                    return;
+                }
+                if (value > creation.maxQuantity) {
+                    player.sendMessage(prefix("Quantity cannot be higher than " + creation.maxQuantity + ".", false));
+                    openCreateOfferMenu(player, creation.type);
+                    return;
+                }
+                creation.quantity = value;
+                openCreateOfferMenu(player, creation.type);
+            }
             default -> {
                 // keep chat flow for quantity input only
                 pendingInputs.put(player.getUniqueId(), pendingInput);
             }
         }
-    }
-
-    private static String extractAnvilText(ItemStack result) {
-        ItemMeta meta = result.getItemMeta();
-        if (meta == null || meta.getDisplayName() == null) {
-            return "";
-        }
-        return ChatColor.stripColor(meta.getDisplayName()).trim();
     }
 
     public void clearState(UUID playerId) {
@@ -796,7 +819,18 @@ public class MenuController {
     }
 
     private static String prettyCategory(String category) {
-        return category.toLowerCase().replace("_", " ");
+        String[] parts = category.toLowerCase().split("_");
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].isEmpty()) {
+                continue;
+            }
+            out.append(Character.toUpperCase(parts[i].charAt(0))).append(parts[i].substring(1));
+            if (i + 1 < parts.length) {
+                out.append(" ");
+            }
+        }
+        return out.toString().trim();
     }
 
     private static Material defaultCategoryIcon(String category) {
