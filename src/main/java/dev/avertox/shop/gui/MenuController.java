@@ -147,30 +147,87 @@ public class MenuController {
             int slot = i;
             ItemStack display = listing.getItem().clone();
             ItemMeta meta = display.getItemMeta();
+            double unitPrice = listing.getQuantity() > 0 ? (listing.getPrice() / listing.getQuantity()) : listing.getPrice();
             List<String> lore = new ArrayList<>();
             lore.add(color("&7Offer: &f" + listing.getOfferName()));
             lore.add(color("&7Qty: &f" + listing.getQuantity()));
             lore.add(color("&7Price: &a$" + ShopService.formatPrice(listing.getPrice())));
+            lore.add(color("&7Unit: &a$" + ShopService.formatPrice(unitPrice)));
             lore.add(color("&8ID: " + listing.getId().toString().substring(0, 8)));
-            lore.add(color("&eClick to buy"));
+            lore.add(color("&eClick to choose quantity"));
             if (meta != null) {
                 meta.setLore(lore);
                 display.setItemMeta(meta);
             }
             inventory.setItem(slot, display);
-            holder.onClick(slot, ctx -> {
-                ServiceResult result = shopService.buyListing(ctx.player(), listing.getId());
-                ctx.player().sendMessage(prefix(result.message(), result.success()));
-                if (result.success()) {
-                    openListingPage(ctx.player(), type, category, page);
-                }
-            });
+            holder.onClick(slot, ctx -> openBuyQuantityMenu(ctx.player(), type, category, page, listing.getId()));
         }
 
         inventory.setItem(48, named(Material.COMPASS, "&bRefresh", List.of("&7Reload live offers")));
         holder.onClick(48, ctx -> openListingPage(ctx.player(), type, category, page));
         decoratePaging(holder, inventory, page, listings.size(), nextPage -> openListingPage(player, type, category, nextPage), () -> openCreativeCategories(player, type, 0));
         player.openInventory(inventory);
+    }
+
+    private void openBuyQuantityMenu(Player player, ListingType type, String category, int page, UUID listingId) {
+        ShopListing listing = shopService.findListing(listingId).orElse(null);
+        if (listing == null) {
+            player.sendMessage(prefix("This offer is no longer available.", false));
+            openListingPage(player, type, category, page);
+            return;
+        }
+
+        AvertoxMenuHolder holder = new AvertoxMenuHolder("buy-qty");
+        Inventory inventory = Bukkit.createInventory(holder, 27, color("&6&lChoose Quantity"));
+        holder.bind(inventory);
+
+        ItemStack preview = listing.getItem().clone();
+        ItemMeta previewMeta = preview.getItemMeta();
+        if (previewMeta != null) {
+            double unitPrice = listing.getQuantity() > 0 ? (listing.getPrice() / listing.getQuantity()) : listing.getPrice();
+            previewMeta.setLore(List.of(
+                    color("&7Offer: &f" + listing.getOfferName()),
+                    color("&7Available: &f" + listing.getQuantity()),
+                    color("&7Unit: &a$" + ShopService.formatPrice(unitPrice))
+            ));
+            preview.setItemMeta(previewMeta);
+        }
+        inventory.setItem(4, preview);
+
+        addBuyOption(holder, inventory, 10, listing, 1, type, category, page);
+        addBuyOption(holder, inventory, 12, listing, 32, type, category, page);
+        addBuyOption(holder, inventory, 14, listing, 64, type, category, page);
+        addBuyOption(holder, inventory, 16, listing, listing.getQuantity(), type, category, page);
+        inventory.setItem(22, named(Material.ARROW, "&7Back", List.of("&7Return to offers")));
+        holder.onClick(22, ctx -> openListingPage(ctx.player(), type, category, page));
+
+        player.openInventory(inventory);
+    }
+
+    private void addBuyOption(AvertoxMenuHolder holder, Inventory inventory, int slot, ShopListing listing, int quantity,
+                              ListingType type, String category, int page) {
+        boolean available = quantity > 0 && quantity <= listing.getQuantity();
+        int finalQuantity = Math.max(1, Math.min(quantity, listing.getQuantity()));
+        double cost = shopService.calculatePurchaseCost(listing, finalQuantity);
+
+        Material icon = available ? Material.LIME_STAINED_GLASS_PANE : Material.GRAY_STAINED_GLASS_PANE;
+        String label = quantity == listing.getQuantity() ? "All" : String.valueOf(quantity);
+        inventory.setItem(slot, named(icon,
+                available ? "&aBuy " + label : "&7Buy " + label,
+                List.of("&7Cost: &a$" + ShopService.formatPrice(cost), available ? "&eClick to confirm" : "&cNot enough stock")));
+
+        if (!available) {
+            return;
+        }
+        holder.onClick(slot, ctx -> {
+            ServiceResult result = shopService.buyListingQuantity(ctx.player(), listing.getId(), finalQuantity);
+            ctx.player().sendMessage(prefix(result.message(), result.success()));
+            if (result.success()) {
+                openListingPage(ctx.player(), type, category, page);
+            } else {
+                openBuyQuantityMenu(ctx.player(), type, category, page, listing.getId());
+            }
+        });
     }
 
     public void openManageOffers(Player player, int page) {

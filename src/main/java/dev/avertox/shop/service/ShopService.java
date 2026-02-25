@@ -79,24 +79,50 @@ public class ShopService {
         if (optionalListing.isEmpty()) {
             return ServiceResult.fail("This offer is no longer available.");
         }
+        return buyListingQuantity(buyer, listingId, optionalListing.get().getQuantity());
+    }
+
+    public ServiceResult buyListingQuantity(Player buyer, UUID listingId, int quantity) {
+        Optional<ShopListing> optionalListing = listingRepository.findById(listingId);
+        if (optionalListing.isEmpty()) {
+            return ServiceResult.fail("This offer is no longer available.");
+        }
         ShopListing listing = optionalListing.get();
-        if (!moneyService.withdraw(buyer.getUniqueId(), listing.getPrice(), "Avertox purchase")) {
+        if (quantity <= 0) {
+            return ServiceResult.fail("Quantity must be greater than 0.");
+        }
+        if (quantity > listing.getQuantity()) {
+            return ServiceResult.fail("Not enough quantity available.");
+        }
+
+        double cost = calculatePurchaseCost(listing, quantity);
+        if (!moneyService.withdraw(buyer.getUniqueId(), cost, "Avertox purchase")) {
             return ServiceResult.fail("You do not have enough money.");
         }
 
         if (listing.getType() == ListingType.AUCTION) {
-            moneyService.deposit(listing.getSellerId(), listing.getPrice(), "Avertox sale");
+            moneyService.deposit(listing.getSellerId(), cost, "Avertox sale");
         }
 
-        List<ItemStack> toGive = ItemUtils.toStacks(listing.getItem(), listing.getQuantity());
+        List<ItemStack> toGive = ItemUtils.toStacks(listing.getItem(), quantity);
         for (ItemStack stack : toGive) {
             Map<Integer, ItemStack> leftovers = buyer.getInventory().addItem(stack);
             if (!leftovers.isEmpty()) {
                 leftovers.values().forEach(item -> buyer.getWorld().dropItemNaturally(buyer.getLocation(), item));
             }
         }
-        listingRepository.delete(listingId);
-        return ServiceResult.ok("Purchased " + listing.getOfferName() + " for $" + formatPrice(listing.getPrice()) + ".");
+
+        int remaining = listing.getQuantity() - quantity;
+        if (remaining <= 0) {
+            listingRepository.delete(listingId);
+        } else {
+            double unitPrice = listing.getPrice() / listing.getQuantity();
+            listing.setQuantity(remaining);
+            listing.setPrice(unitPrice * remaining);
+            listingRepository.save(listing);
+        }
+
+        return ServiceResult.ok("Purchased " + quantity + "x " + listing.getOfferName() + " for $" + formatPrice(cost) + ".");
     }
 
     public ServiceResult removeListing(Player actor, UUID listingId) {
@@ -191,5 +217,13 @@ public class ShopService {
 
     public static String formatPrice(double value) {
         return String.format("%.2f", value);
+    }
+
+    public double calculatePurchaseCost(ShopListing listing, int quantity) {
+        if (listing.getQuantity() <= 0 || quantity <= 0) {
+            return 0.0;
+        }
+        double unitPrice = listing.getPrice() / listing.getQuantity();
+        return unitPrice * quantity;
     }
 }
