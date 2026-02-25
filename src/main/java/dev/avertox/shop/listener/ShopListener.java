@@ -30,6 +30,10 @@ public class ShopListener implements Listener {
         if (!(event.getView().getTopInventory().getHolder() instanceof AvertoxMenuHolder holder)) {
             return;
         }
+        if ("anvil-input".equals(holder.getMenuId())) {
+            menuController.handleAnvilInputClick(event, player, holder);
+            return;
+        }
         if ("sell-input".equals(holder.getMenuId())) {
             menuController.handleSellInputClick(event, player, holder);
             return;

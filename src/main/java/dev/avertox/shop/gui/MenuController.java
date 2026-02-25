@@ -10,6 +10,8 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -111,9 +113,9 @@ public class MenuController {
         for (int i = 0; i < paged.size(); i++) {
             String category = paged.get(i);
             List<ShopListing> offers = grouped.getOrDefault(category, List.of());
-            Material icon = offers.isEmpty() ? Material.CHEST : offers.get(0).getItem().getType();
+            Material icon = defaultCategoryIcon(category);
             int slot = i;
-            inventory.setItem(slot, named(icon, "&e" + category, List.of("&7Offers: &f" + offers.size(), "&8Click to open")));
+            inventory.setItem(slot, named(icon, "&e" + prettyCategory(category), List.of("&7Offers: &f" + offers.size(), "&8Click to open")));
             holder.onClick(slot, ctx -> openListingPage(ctx.player(), type, category, 0));
         }
 
@@ -130,7 +132,7 @@ public class MenuController {
                 .toList();
 
         AvertoxMenuHolder holder = new AvertoxMenuHolder("listings");
-        Inventory inventory = Bukkit.createInventory(holder, 54, color("&6&lAvertox " + category + " P" + (page + 1)));
+        Inventory inventory = Bukkit.createInventory(holder, 54, color("&6&lAvertox " + prettyCategory(category) + " P" + (page + 1)));
         holder.bind(inventory);
 
         List<ShopListing> paged = page(listings, page);
@@ -225,14 +227,10 @@ public class MenuController {
             openOfferEditor(ctx.player(), listingId);
         });
         holder.onClick(12, ctx -> {
-            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.UPDATE_PRICE, listingId));
-            ctx.player().closeInventory();
-            ctx.player().sendMessage(prefix("Type the new price in chat.", true));
+            openAnvilInput(ctx.player(), PendingInputType.UPDATE_PRICE, listingId, "Set Price", "0.00");
         });
         holder.onClick(14, ctx -> {
-            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.UPDATE_NAME, listingId));
-            ctx.player().closeInventory();
-            ctx.player().sendMessage(prefix("Type the new listing name in chat.", true));
+            openAnvilInput(ctx.player(), PendingInputType.UPDATE_NAME, listingId, "Rename Offer", listing.getOfferName());
         });
         holder.onClick(15, ctx -> {
             ServiceResult result = shopService.addToStack(ctx.player(), listingId, ctx.player().getInventory().getItemInMainHand());
@@ -290,14 +288,10 @@ public class MenuController {
             openCreateOfferMenu(ctx.player(), type);
         });
         holder.onClick(12, ctx -> {
-            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_PRICE, null));
-            ctx.player().closeInventory();
-            ctx.player().sendMessage(prefix("Type the offer price in chat.", true));
+            openAnvilInput(ctx.player(), PendingInputType.CREATE_PRICE, null, "Set Price", "0.00");
         });
         holder.onClick(14, ctx -> {
-            pendingInputs.put(ctx.player().getUniqueId(), new PendingInput(PendingInputType.CREATE_NAME, null));
-            ctx.player().closeInventory();
-            ctx.player().sendMessage(prefix("Type the offer name in chat.", true));
+            openAnvilInput(ctx.player(), PendingInputType.CREATE_NAME, null, "Set Name", current.offerName);
         });
         holder.onClick(15, ctx -> {
             current.quantity = Math.max(1, current.quantity - 1);
@@ -452,6 +446,20 @@ public class MenuController {
         }
     }
 
+    public void handleAnvilInputClick(InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
+        event.setCancelled(true);
+        if (!"anvil-input".equals(holder.getMenuId()) || event.getRawSlot() != 2) {
+            return;
+        }
+        ItemStack result = event.getCurrentItem();
+        if (result == null || result.getType() == Material.AIR) {
+            player.sendMessage(prefix("Type a value in the anvil rename field first.", false));
+            return;
+        }
+        String text = extractAnvilText(result);
+        handleAnvilSubmit(player, text);
+    }
+
     public void handleSellInputClick(org.bukkit.event.inventory.InventoryClickEvent event, Player player, AvertoxMenuHolder holder) {
         Inventory top = event.getView().getTopInventory();
         int rawSlot = event.getRawSlot();
@@ -509,6 +517,9 @@ public class MenuController {
 
     public void handleInventoryClose(Player player, Inventory inventory, AvertoxMenuHolder holder) {
         if (!"sell-input".equals(holder.getMenuId())) {
+            if ("anvil-input".equals(holder.getMenuId())) {
+                pendingInputs.remove(player.getUniqueId());
+            }
             return;
         }
         SellInventorySession session = sellSessions.get(player.getUniqueId());
@@ -521,6 +532,93 @@ public class MenuController {
         }
         returnSellInputItems(player, inventory);
         sellSessions.remove(player.getUniqueId());
+    }
+
+    private void openAnvilInput(Player player, PendingInputType type, UUID listingId, String title, String seedText) {
+        pendingInputs.put(player.getUniqueId(), new PendingInput(type, listingId));
+        AvertoxMenuHolder holder = new AvertoxMenuHolder("anvil-input");
+        Inventory inventory = Bukkit.createInventory(holder, InventoryType.ANVIL, color("&6&lAvertox " + title));
+        holder.bind(inventory);
+
+        ItemStack paper = new ItemStack(Material.PAPER);
+        ItemMeta meta = paper.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(seedText);
+            paper.setItemMeta(meta);
+        }
+        inventory.setItem(0, paper);
+        player.openInventory(inventory);
+        player.sendMessage(prefix("Type the value in the anvil text field, then click output.", true));
+    }
+
+    private void handleAnvilSubmit(Player player, String text) {
+        PendingInput pendingInput = pendingInputs.remove(player.getUniqueId());
+        if (pendingInput == null) {
+            return;
+        }
+
+        switch (pendingInput.type) {
+            case UPDATE_NAME -> {
+                if (pendingInput.listingId == null) {
+                    player.sendMessage(prefix("Listing not found.", false));
+                    return;
+                }
+                ServiceResult result = shopService.updateAuctionName(player, pendingInput.listingId, text);
+                player.sendMessage(prefix(result.message(), result.success()));
+                openOfferEditor(player, pendingInput.listingId);
+            }
+            case UPDATE_PRICE -> {
+                if (pendingInput.listingId == null) {
+                    player.sendMessage(prefix("Listing not found.", false));
+                    return;
+                }
+                double value = parsePrice(text);
+                if (value <= 0) {
+                    player.sendMessage(prefix("Invalid price.", false));
+                    openOfferEditor(player, pendingInput.listingId);
+                    return;
+                }
+                ServiceResult result = shopService.updateAuctionPrice(player, pendingInput.listingId, value);
+                player.sendMessage(prefix(result.message(), result.success()));
+                openOfferEditor(player, pendingInput.listingId);
+            }
+            case CREATE_NAME -> {
+                PendingCreation creation = pendingCreations.get(player.getUniqueId());
+                if (creation == null) {
+                    player.sendMessage(prefix("No creation session available.", false));
+                    return;
+                }
+                creation.offerName = text;
+                openCreateOfferMenu(player, creation.type);
+            }
+            case CREATE_PRICE -> {
+                PendingCreation creation = pendingCreations.get(player.getUniqueId());
+                if (creation == null) {
+                    player.sendMessage(prefix("No creation session available.", false));
+                    return;
+                }
+                double value = parsePrice(text);
+                if (value <= 0) {
+                    player.sendMessage(prefix("Invalid price.", false));
+                    openCreateOfferMenu(player, creation.type);
+                    return;
+                }
+                creation.price = value;
+                openCreateOfferMenu(player, creation.type);
+            }
+            default -> {
+                // keep chat flow for quantity input only
+                pendingInputs.put(player.getUniqueId(), pendingInput);
+            }
+        }
+    }
+
+    private static String extractAnvilText(ItemStack result) {
+        ItemMeta meta = result.getItemMeta();
+        if (meta == null || meta.getDisplayName() == null) {
+            return "";
+        }
+        return ChatColor.stripColor(meta.getDisplayName()).trim();
     }
 
     public void clearState(UUID playerId) {
@@ -697,6 +795,24 @@ public class MenuController {
         return item.getType().name().toLowerCase().replace("_", " ");
     }
 
+    private static String prettyCategory(String category) {
+        return category.toLowerCase().replace("_", " ");
+    }
+
+    private static Material defaultCategoryIcon(String category) {
+        return switch (category) {
+            case "BUILDING_BLOCKS" -> Material.BRICKS;
+            case "DECORATIONS" -> Material.FLOWER_POT;
+            case "REDSTONE" -> Material.REDSTONE;
+            case "TRANSPORTATION" -> Material.MINECART;
+            case "FOOD" -> Material.APPLE;
+            case "TOOLS" -> Material.IRON_PICKAXE;
+            case "COMBAT" -> Material.IRON_SWORD;
+            case "BREWING" -> Material.BREWING_STAND;
+            default -> Material.CHEST;
+        };
+    }
+
     private static List<String> sortCreativeCategories(List<String> categories) {
         List<String> ordered = new ArrayList<>(List.of(
                 "BUILDING_BLOCKS",
@@ -714,7 +830,7 @@ public class MenuController {
                 ordered.add(category);
             }
         }
-        return ordered.stream().filter(categories::contains).toList();
+        return ordered;
     }
 
     private static <T> List<T> page(List<T> list, int page) {
