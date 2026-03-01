@@ -115,3 +115,6 @@ Default implementations included:
 - `src/main/java/dev/avertox/shop/gui/MenuController.java`
 - `src/main/resources/plugin.yml`
 
+## License
+This project is proprietary. See the `LICENSE` file for full terms.
+
